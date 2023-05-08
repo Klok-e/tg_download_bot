@@ -80,60 +80,63 @@ async fn run_bot(app_config: Arc<AppConfig>) {
 }
 
 async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfig>) -> Result<()> {
-    match &message.kind {
-        MessageKind::Common {
-            0: MessageCommon { media_kind, .. },
-            ..
-        } => match media_kind {
-            MediaKind::Photo(photo) => {
-                let max_size = photo
-                    .photo
-                    .iter()
-                    .max_by_key(|photo| photo.file.size)
-                    .unwrap();
-
-                download_and_save_file(
-                    bot,
-                    &max_size.file,
-                    &config.media_directory,
-                    photo.caption.as_deref(),
-                    "jpg",
-                )
-                .await
-                .context("Failed download photo")?;
-            }
-            MediaKind::Video(video) => {
-                download_and_save_file(
-                    bot,
-                    &video.video.file,
-                    &config.media_directory,
-                    video
-                        .caption
-                        .as_deref()
-                        .or(video.video.file_name.as_deref()),
-                    "mp4",
-                )
-                .await
-                .context("Failed download video")?;
-            }
-            MediaKind::Audio(audio) => {
-                download_and_save_file(
-                    bot,
-                    &audio.audio.file,
-                    &config.media_directory,
-                    audio
-                        .caption
-                        .as_deref()
-                        .or(audio.audio.file_name.as_deref()),
-                    "mp3",
-                )
-                .await
-                .context("Failed download audio")?;
-            }
-            _ => (),
-        },
-        _ => (),
+    let media_kind = if let MessageKind::Common {
+        0: MessageCommon { media_kind, .. },
+        ..
+    } = &message.kind
+    {
+        media_kind
+    } else {
+        return Ok(());
     };
+    match media_kind {
+        MediaKind::Photo(photo) => {
+            let max_size = photo
+                .photo
+                .iter()
+                .max_by_key(|photo| photo.file.size)
+                .unwrap();
+
+            download_and_save_file(
+                bot,
+                &max_size.file,
+                &config.media_directory,
+                photo.caption.as_deref(),
+                "jpg",
+            )
+            .await
+            .context("Failed download photo")?;
+        }
+        MediaKind::Video(video) => {
+            download_and_save_file(
+                bot,
+                &video.video.file,
+                &config.media_directory,
+                video
+                    .caption
+                    .as_deref()
+                    .or(video.video.file_name.as_deref()),
+                "mp4",
+            )
+            .await
+            .context("Failed download video")?;
+        }
+        MediaKind::Audio(audio) => {
+            download_and_save_file(
+                bot,
+                &audio.audio.file,
+                &config.media_directory,
+                audio
+                    .caption
+                    .as_deref()
+                    .or(audio.audio.file_name.as_deref()),
+                "mp3",
+            )
+            .await
+            .context("Failed download audio")?;
+        }
+        _ => (),
+    }
     Ok(())
 }
 
