@@ -1,16 +1,14 @@
-use std::{fs, path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
-use anyhow::{anyhow, Context, Ok, Result};
-use config::{Config, ConfigBuilder, File};
+use anyhow::{Context, Ok, Result};
+use config::Config;
 use log::warn;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use teloxide::{
     net::Download,
-    types::{Document, FileMeta, InputFile, MediaKind, MessageKind, PhotoSize},
+    types::{FileMeta, MediaKind, MessageKind, MessageCommon}, prelude::*,
 };
-use teloxide::{prelude::*, types::MessageCommon};
-use tokio::runtime::Builder;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,7 +27,7 @@ struct AppConfig {
 }
 
 fn read_config() -> Result<AppConfig> {
-    let mut config = Config::builder()
+    let config = Config::builder()
         .add_source(config::File::with_name("config"))
         .build()?;
 
@@ -86,7 +84,7 @@ async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfi
                     bot,
                     &max_size.file,
                     &config.media_directory,
-                    photo.caption.as_ref().map(|x| x.as_str()),
+                    photo.caption.as_deref(),
                     "jpg",
                 )
                 .await
@@ -99,9 +97,8 @@ async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfi
                     &config.media_directory,
                     video
                         .caption
-                        .as_ref()
-                        .map(|x| x.as_str())
-                        .or_else(|| video.video.file_name.as_ref().map(|x| x.as_str())),
+                        .as_deref()
+                        .or(video.video.file_name.as_deref()),
                     "mp4",
                 )
                 .await
@@ -112,7 +109,7 @@ async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfi
                     bot,
                     &audio.audio.file,
                     &config.media_directory,
-                    audio.caption.as_ref().map(|x| x.as_str()),
+                    audio.caption.as_deref(),
                     "mp3",
                 )
                 .await
@@ -133,7 +130,7 @@ async fn download_and_save_file(
     ext: &str,
 ) -> Result<()> {
     let file = bot.get_file(file_meta.id.clone()).send().await?;
-    let (filename, extension) = if let Some(file_name) = file_name.map(|x| Path::new(x)) {
+    let (filename, extension) = if let Some(file_name) = file_name.map(Path::new) {
         match (file_name.file_stem(), file_name.extension()) {
             (Some(stem), Some(ext)) => (
                 stem.to_str().expect("Bad filename"),
@@ -142,7 +139,7 @@ async fn download_and_save_file(
             _ => (file_meta.unique_id.as_str(), ext),
         }
     } else {
-        (&file_meta.unique_id, ext)
+        (file_meta.unique_id.as_str(), ext)
     };
     let file_path = format!("{}/{}.{}", media_directory, filename, extension);
 
