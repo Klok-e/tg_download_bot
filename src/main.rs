@@ -1,13 +1,13 @@
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, path::Path, sync::Arc, time::Duration};
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{anyhow, Context, Ok, Result};
 use config::{Config, ConfigBuilder, File};
 use log::warn;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use teloxide::{
     net::Download,
-    types::{Document, InputFile, MessageKind, PhotoSize},
+    types::{Document, FileMeta, InputFile, MediaKind, MessageKind, PhotoSize},
 };
 use teloxide::{prelude::*, types::MessageCommon};
 use tokio::runtime::Builder;
@@ -52,10 +52,8 @@ async fn run_bot(app_config: Arc<AppConfig>) {
     ));
 
     let handler = Update::filter_message().branch(
-        dptree::filter(|msg: Message, config: Arc<config::Config>| {
-            app_config.channel_id == msg.chat.id.0
-        })
-        .endpoint(handle_media_message),
+        dptree::filter(|msg: Message, config: Arc<AppConfig>| config.channel_id == msg.chat.id.0)
+            .endpoint(handle_media_message),
     );
 
     Dispatcher::builder(bot.clone(), handler)
@@ -71,25 +69,54 @@ async fn run_bot(app_config: Arc<AppConfig>) {
         .await;
 }
 
-async fn handle_media_message(bot: &Bot, message: &Message, media_directory: &str) -> Result<()> {
+async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfig>) -> Result<()> {
     match &message.kind {
         MessageKind::Common {
             0: MessageCommon { media_kind, .. },
             ..
         } => match media_kind {
-            teloxide::types::MediaKind::Photo { 0: photo, .. } => {
+            MediaKind::Photo(photo) => {
                 let max_size = photo
                     .photo
                     .iter()
                     .max_by_key(|photo| photo.file.size)
                     .unwrap();
-                download_and_save_file(bot, &max_size.file.id, media_directory).await;
+
+                download_and_save_file(
+                    bot,
+                    &max_size.file,
+                    &config.media_directory,
+                    photo.caption.as_ref().map(|x| x.as_str()),
+                    "jpg",
+                )
+                .await
+                .context("Failed download photo")?;
             }
-            teloxide::types::MediaKind::Video { 0: video, .. } => {
-                download_and_save_file(bot, video, media_directory).await;
+            MediaKind::Video(video) => {
+                download_and_save_file(
+                    bot,
+                    &video.video.file,
+                    &config.media_directory,
+                    video
+                        .caption
+                        .as_ref()
+                        .map(|x| x.as_str())
+                        .or_else(|| video.video.file_name.as_ref().map(|x| x.as_str())),
+                    "mp4",
+                )
+                .await
+                .context("Failed download video")?;
             }
-            teloxide::types::MediaKind::Document { 0: document, .. } => {
-                download_and_save_file(bot, document, media_directory).await;
+            MediaKind::Audio(audio) => {
+                download_and_save_file(
+                    bot,
+                    &audio.audio.file,
+                    &config.media_directory,
+                    audio.caption.as_ref().map(|x| x.as_str()),
+                    "mp3",
+                )
+                .await
+                .context("Failed download audio")?;
             }
             _ => (),
         },
@@ -98,9 +125,26 @@ async fn handle_media_message(bot: &Bot, message: &Message, media_directory: &st
     Ok(())
 }
 
-async fn download_and_save_file(bot: &Bot, file_id: &str, media_directory: &str) -> Result<()> {
-    let file = bot.get_file(file_id).send().await?;
-    let file_path = format!("{}/{}", media_directory, file_id);
+async fn download_and_save_file(
+    bot: &Bot,
+    file_meta: &FileMeta,
+    media_directory: &str,
+    file_name: Option<&str>,
+    ext: &str,
+) -> Result<()> {
+    let file = bot.get_file(file_meta.id.clone()).send().await?;
+    let (filename, extension) = if let Some(file_name) = file_name.map(|x| Path::new(x)) {
+        match (file_name.file_stem(), file_name.extension()) {
+            (Some(stem), Some(ext)) => (
+                stem.to_str().expect("Bad filename"),
+                ext.to_str().expect("Bad filename"),
+            ),
+            _ => (file_meta.unique_id.as_str(), ext),
+        }
+    } else {
+        (&file_meta.unique_id, ext)
+    };
+    let file_path = format!("{}/{}.{}", media_directory, filename, extension);
 
     let mut dst = tokio::fs::File::create(&file_path).await?;
     if let Err(e) = bot.download_file(&file.path, &mut dst).await {
