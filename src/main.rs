@@ -1,18 +1,26 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Context, Ok, Result};
-use config::Config;
+use config::{Config, FileFormat};
 use log::warn;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use teloxide::{
     net::Download,
-    types::{FileMeta, MediaKind, MessageKind, MessageCommon}, prelude::*,
+    prelude::*,
+    types::{FileMeta, MediaKind, MessageCommon, MessageKind},
 };
+
+const CONFIG_PATH_ENV: &str = "CONFIG_PATH";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let app_config = read_config()?;
+    let app_config = read_config().context("Config read failed")?;
 
     run_bot(Arc::new(app_config)).await;
 
@@ -28,7 +36,11 @@ struct AppConfig {
 
 fn read_config() -> Result<AppConfig> {
     let config = Config::builder()
-        .add_source(config::File::with_name("config"))
+        .add_source(config::File::new(
+            &env::var(CONFIG_PATH_ENV)
+                .with_context(|| format!("{CONFIG_PATH_ENV} environment variable not set"))?,
+            FileFormat::Toml,
+        ))
         .build()?;
 
     Ok(config
@@ -109,7 +121,10 @@ async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfi
                     bot,
                     &audio.audio.file,
                     &config.media_directory,
-                    audio.caption.as_deref(),
+                    audio
+                        .caption
+                        .as_deref()
+                        .or(audio.audio.file_name.as_deref()),
                     "mp3",
                 )
                 .await
@@ -130,24 +145,39 @@ async fn download_and_save_file(
     ext: &str,
 ) -> Result<()> {
     let file = bot.get_file(file_meta.id.clone()).send().await?;
-    let (filename, extension) = if let Some(file_name) = file_name.map(Path::new) {
-        match (file_name.file_stem(), file_name.extension()) {
-            (Some(stem), Some(ext)) => (
-                stem.to_str().expect("Bad filename"),
-                ext.to_str().expect("Bad filename"),
-            ),
-            _ => (file_meta.unique_id.as_str(), ext),
-        }
-    } else {
-        (file_meta.unique_id.as_str(), ext)
-    };
-    let file_path = format!("{}/{}.{}", media_directory, filename, extension);
+    let (filename, extension) = get_filename_and_extension(file_meta, file_name, ext);
+    let mut file_path = PathBuf::from(media_directory);
+    file_path.push(format!("{}.{}", filename, extension));
 
-    let mut dst = tokio::fs::File::create(&file_path).await?;
+    let mut dst = tokio::fs::File::create(&file_path)
+        .await
+        .context(format!("Failed to create file: {}", file_path.display()))?;
     if let Err(e) = bot.download_file(&file.path, &mut dst).await {
         log::error!("Failed to download file: {}", e);
     } else {
-        log::info!("Downloaded and saved file: {}", file_path);
+        log::info!("Downloaded and saved file: {}", file_path.display());
     }
     Ok(())
+}
+
+fn get_filename_and_extension(
+    file_meta: &FileMeta,
+    file_name: Option<&str>,
+    default_ext: &str,
+) -> (String, String) {
+    if let Some(file_name) = file_name.map(Path::new) {
+        let stem = file_name
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&file_meta.unique_id);
+
+        let ext = file_name
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or(default_ext);
+
+        (stem.to_owned(), ext.to_owned())
+    } else {
+        (file_meta.unique_id.clone(), default_ext.to_owned())
+    }
 }
