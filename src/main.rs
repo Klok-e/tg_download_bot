@@ -61,13 +61,13 @@ async fn run_bot(app_config: Arc<AppConfig>) {
         client,
     ));
 
-    let handler = Update::filter_message().branch(
+    let handler = Update::filter_channel_post().branch(
         dptree::filter(|msg: Message, config: Arc<AppConfig>| config.channel_id == msg.chat.id.0)
             .endpoint(handle_media_message),
     );
 
     Dispatcher::builder(bot.clone(), handler)
-        .dependencies(dptree::deps![app_config.clone()])
+        .dependencies(dptree::deps![app_config.clone(), bot.clone()])
         .default_handler(|upd| async move {
             warn!("unhandled update: {:?}", upd);
         })
@@ -79,7 +79,11 @@ async fn run_bot(app_config: Arc<AppConfig>) {
         .await;
 }
 
-async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfig>) -> Result<()> {
+async fn handle_media_message(
+    bot: Arc<Bot>,
+    message: Message,
+    config: Arc<AppConfig>,
+) -> Result<()> {
     let media_kind = if let MessageKind::Common {
         0: MessageCommon { media_kind, .. },
         ..
@@ -141,7 +145,7 @@ async fn handle_media_message(bot: &Bot, message: &Message, config: Arc<AppConfi
 }
 
 async fn download_and_save_file(
-    bot: &Bot,
+    bot: Arc<Bot>,
     file_meta: &FileMeta,
     media_directory: &str,
     file_name: Option<&str>,
@@ -152,6 +156,9 @@ async fn download_and_save_file(
     let mut file_path = PathBuf::from(media_directory);
     file_path.push(format!("{}.{}", filename, extension));
 
+    tokio::fs::create_dir_all(&file_path.parent().expect("Parent missing"))
+        .await
+        .context("Create dir all failed")?;
     let mut dst = tokio::fs::File::create(&file_path)
         .await
         .context(format!("Failed to create file: {}", file_path.display()))?;
@@ -168,19 +175,25 @@ fn get_filename_and_extension(
     file_name: Option<&str>,
     default_ext: &str,
 ) -> (String, String) {
-    if let Some(file_name) = file_name.map(Path::new) {
-        let stem = file_name
+    let stem = if let Some(file_name) = file_name.map(Path::new) {
+        file_name
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or(&file_meta.unique_id);
+            .unwrap_or(&file_meta.unique_id)
+    } else {
+        &file_meta.unique_id
+    };
 
-        let ext = file_name
+    let ext = if let Some(file_name) = file_name.map(Path::new) {
+        file_name
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or(default_ext);
-
-        (stem.to_owned(), ext.to_owned())
+            .unwrap_or(default_ext)
     } else {
-        (file_meta.unique_id.clone(), default_ext.to_owned())
-    }
+        default_ext
+    };
+
+    let filename = format!("{}_{}", stem, file_meta.unique_id);
+
+    (filename, ext.to_owned())
 }
