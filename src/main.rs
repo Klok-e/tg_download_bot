@@ -53,7 +53,7 @@ async fn run_bot(app_config: Arc<AppConfig>) {
     log::info!("Starting media downloader bot...");
 
     let client = teloxide::net::default_reqwest_settings()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(600))
         .build()
         .expect("Client creation failed");
     let bot = Arc::new(Bot::with_client(
