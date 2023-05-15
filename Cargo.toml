@@ -15,3 +15,4 @@ serde = { version = "1.0.144", features = ["derive"] }
 log = "0.4.17"
 secrecy = { version = "0.8.0", features = ["serde"] }
 env_logger = "0.10.0"
+reqwest = "0.11.14"

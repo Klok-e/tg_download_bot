@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, Ok, Result};
 use config::{Config, FileFormat};
 use log::warn;
+use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use teloxide::{
@@ -17,6 +18,7 @@ use teloxide::{
 };
 
 const CONFIG_PATH_ENV: &str = "CONFIG_PATH";
+const TELEGRAM_BOT_API_URL_ENV: &str = "TELEGRAM_BOT_API_URL";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -56,18 +58,24 @@ async fn run_bot(app_config: Arc<AppConfig>) {
         .timeout(Duration::from_secs(600))
         .build()
         .expect("Client creation failed");
-    let bot = Arc::new(Bot::with_client(
-        app_config.bot_token.expose_secret(),
-        client,
-    ));
+    let mut tg = Bot::with_client(app_config.bot_token.expose_secret(), client);
+
+    if let Some(url) = env::var_os(TELEGRAM_BOT_API_URL_ENV) {
+        tg = tg.set_api_url(
+            Url::parse(url.to_str().expect("Unicode string expected"))
+                .expect("Bot api must be a url"),
+        );
+    }
+
+    let tg = Arc::new(tg);
 
     let handler = Update::filter_channel_post().branch(
         dptree::filter(|msg: Message, config: Arc<AppConfig>| config.channel_id == msg.chat.id.0)
             .endpoint(handle_media_message),
     );
 
-    Dispatcher::builder(bot.clone(), handler)
-        .dependencies(dptree::deps![app_config.clone(), bot.clone()])
+    Dispatcher::builder(tg.clone(), handler)
+        .dependencies(dptree::deps![app_config.clone(), tg.clone()])
         .default_handler(|upd| async move {
             warn!("unhandled update: {:?}", upd);
         })
