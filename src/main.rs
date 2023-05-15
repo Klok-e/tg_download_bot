@@ -16,6 +16,7 @@ use teloxide::{
     prelude::*,
     types::{FileMeta, MediaKind, MessageCommon, MessageKind},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const CONFIG_PATH_ENV: &str = "CONFIG_PATH";
 const TELEGRAM_BOT_API_URL_ENV: &str = "TELEGRAM_BOT_API_URL";
@@ -170,7 +171,12 @@ async fn download_and_save_file(
     let mut dst = tokio::fs::File::create(&file_path)
         .await
         .context(format!("Failed to create file: {}", file_path.display()))?;
-    if let Err(e) = bot.download_file(&file.path, &mut dst).await {
+    if Path::new(&file.path).is_absolute() {
+        let mut absolute_file = tokio::fs::File::open(file.path).await?;
+        let mut buf = Vec::new();
+        absolute_file.read_to_end(&mut buf).await?;
+        dst.write_all(&buf).await?;
+    } else if let Err(e) = bot.download_file(&file.path, &mut dst).await {
         log::error!("Failed to download file: {}", e);
     } else {
         log::info!("Downloaded and saved file: {}", file_path.display());
