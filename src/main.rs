@@ -237,10 +237,10 @@ fn get_filename_and_extension(
     };
 
     let title_prefix = if page_number.is_some() { "title:" } else { "" };
-    let page_part = page_number.map_or_else(String::new, |num| format!("_page:{}", num));
+    let page_part = page_number.map_or_else(String::new, |num| format!("{{page:{}}}", num));
 
     let unique_id = &file_meta.unique_id;
-    let filename = format!("{title_prefix}{stem}_{unique_id}{page_part}");
+    let filename = format!("{title_prefix}[{stem}]_{unique_id}{page_part}");
 
     (filename, ext.to_owned())
 }
