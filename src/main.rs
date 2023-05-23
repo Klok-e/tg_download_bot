@@ -25,7 +25,7 @@ const TELEGRAM_BOT_API_URL_ENV: &str = "TELEGRAM_BOT_API_URL";
 async fn main() -> Result<()> {
     let app_config = read_config().context("Config read failed")?;
 
-    run_bot(Arc::new(app_config)).await;
+    run_bot(app_config).await;
 
     Ok(())
 }
@@ -35,6 +35,10 @@ struct AppConfig {
     bot_token: SecretString,
     channel_id: i64,
     media_directory: String,
+}
+
+struct AppState {
+    config: AppConfig,
     media_group_page_numbers: Mutex<std::collections::HashMap<String, u32>>,
 }
 
@@ -52,7 +56,7 @@ fn read_config() -> Result<AppConfig> {
         .context("Failed to parse config values")?)
 }
 
-async fn run_bot(app_config: Arc<AppConfig>) {
+async fn run_bot(app_config: AppConfig) {
     env_logger::init();
     log::info!("Starting media downloader bot...");
 
@@ -72,12 +76,18 @@ async fn run_bot(app_config: Arc<AppConfig>) {
     let tg = Arc::new(tg);
 
     let handler = Update::filter_channel_post().branch(
-        dptree::filter(|msg: Message, config: Arc<AppConfig>| config.channel_id == msg.chat.id.0)
-            .endpoint(handle_media_message),
+        dptree::filter(|msg: Message, app_state: Arc<AppState>| {
+            app_state.config.channel_id == msg.chat.id.0
+        })
+        .endpoint(handle_media_message),
     );
 
+    let app_state = Arc::new(AppState {
+        config: app_config,
+        media_group_page_numbers: Default::default(),
+    });
     Dispatcher::builder(tg.clone(), handler)
-        .dependencies(dptree::deps![app_config.clone(), tg.clone()])
+        .dependencies(dptree::deps![app_state, tg.clone()])
         .default_handler(|upd| async move {
             warn!("unhandled update: {:?}", upd);
         })
@@ -92,7 +102,7 @@ async fn run_bot(app_config: Arc<AppConfig>) {
 async fn handle_media_message(
     bot: Arc<Bot>,
     message: Message,
-    config: Arc<AppConfig>,
+    app_state: Arc<AppState>,
 ) -> Result<()> {
     let media_kind = if let MessageKind::Common {
         0: MessageCommon { media_kind, .. },
@@ -108,7 +118,7 @@ async fn handle_media_message(
 
     // increment page number
     let page_number = if let Some(media_group_id) = &media_group_id {
-        let mut map = config.media_group_page_numbers.lock().unwrap();
+        let mut map = app_state.media_group_page_numbers.lock().unwrap();
         let page_number = map.entry(media_group_id.clone()).or_insert(0);
         *page_number += 1;
         Some(*page_number)
@@ -127,7 +137,7 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &max_size.file,
-                &config.media_directory,
+                &app_state.config.media_directory,
                 photo.caption.as_deref(),
                 "jpg",
                 page_number,
@@ -139,7 +149,7 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &video.video.file,
-                &config.media_directory,
+                &app_state.config.media_directory,
                 video
                     .caption
                     .as_deref()
@@ -154,7 +164,7 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &audio.audio.file,
-                &config.media_directory,
+                &app_state.config.media_directory,
                 audio
                     .caption
                     .as_deref()
