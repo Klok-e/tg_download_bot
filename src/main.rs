@@ -216,25 +216,17 @@ fn get_filename_and_extension(
     file_meta: &FileMeta,
     file_name: Option<&str>,
     default_ext: &str,
-    page_number: Option<u32>, // Added page number
+    page_number: Option<u32>,
 ) -> (String, String) {
-    let stem = if let Some(file_name) = file_name.map(Path::new) {
-        file_name
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&file_meta.unique_id)
-    } else {
-        &file_meta.unique_id
-    };
+    let stem = file_name
+        .map(Path::new)
+        .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
+        .unwrap_or("");
 
-    let ext = if let Some(file_name) = file_name.map(Path::new) {
-        file_name
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or(default_ext)
-    } else {
-        default_ext
-    };
+    let ext = file_name
+        .map(Path::new)
+        .and_then(|p| p.extension().and_then(|e| e.to_str()))
+        .unwrap_or(default_ext);
 
     let title_prefix = if page_number.is_some() { "title:" } else { "" };
     let page_part = page_number.map_or_else(String::new, |num| format!("{{page:{}}}", num));
