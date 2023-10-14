@@ -141,6 +141,7 @@ async fn handle_media_message(
                 photo.caption.as_deref(),
                 "jpg",
                 page_number,
+                media_group_id.as_ref(),
             )
             .await
             .context("Failed download photo")?;
@@ -156,6 +157,7 @@ async fn handle_media_message(
                     .or(video.video.file_name.as_deref()),
                 "mp4",
                 page_number,
+                media_group_id.as_ref(),
             )
             .await
             .context("Failed download video")?;
@@ -171,6 +173,7 @@ async fn handle_media_message(
                     .or(audio.audio.file_name.as_deref()),
                 "mp3",
                 page_number,
+                media_group_id.as_ref(),
             )
             .await
             .context("Failed download audio")?;
@@ -187,9 +190,11 @@ async fn download_and_save_file(
     file_name: Option<&str>,
     ext: &str,
     page_number: Option<u32>,
+    media_group_id: Option<&String>,
 ) -> Result<()> {
     let file = bot.get_file(file_meta.id.clone()).send().await?;
-    let (filename, extension) = get_filename_and_extension(file_meta, file_name, ext, page_number);
+    let (filename, extension) =
+        get_filename_and_extension(file_meta, file_name, ext, page_number, media_group_id);
     let mut file_path = PathBuf::from(media_directory);
     file_path.push(format!("{}.{}", filename, extension));
 
@@ -217,10 +222,12 @@ fn get_filename_and_extension(
     file_name: Option<&str>,
     default_ext: &str,
     page_number: Option<u32>,
+    media_group_id: Option<&String>,
 ) -> (String, String) {
     let stem = file_name
         .map(Path::new)
         .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
+        .or_else(|| media_group_id.map(|x| x.as_str()))
         .unwrap_or("");
 
     let ext = file_name
