@@ -9,7 +9,7 @@ edition = "2021"
 teloxide = { version = "0.12.2", features = ["macros"] }
 tokio = { version = "1.21.0", features = ["rt-multi-thread", "macros", "sync"] }
 anyhow = "1.0.64"
-toml = "0.7.3"
+toml = "0.8.2"
 config = "0.13.3"
 serde = { version = "1.0.144", features = ["derive"] }
 log = "0.4.17"
