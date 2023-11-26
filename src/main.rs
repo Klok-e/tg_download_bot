@@ -39,7 +39,13 @@ struct AppConfig {
 
 struct AppState {
     config: AppConfig,
-    media_group_page_numbers: Mutex<std::collections::HashMap<String, u32>>,
+    media_group_page_numbers: Mutex<std::collections::HashMap<String, MediaGroupData>>,
+}
+
+#[derive(Debug, Clone)]
+struct MediaGroupData {
+    page_number: u32,
+    title: String,
 }
 
 fn read_config() -> Result<AppConfig> {
@@ -116,16 +122,6 @@ async fn handle_media_message(
 
     let media_group_id = message.media_group_id().map(|s| s.to_owned());
 
-    // increment page number
-    let page_number = if let Some(media_group_id) = &media_group_id {
-        let mut map = app_state.media_group_page_numbers.lock().unwrap();
-        let page_number = map.entry(media_group_id.clone()).or_insert(0);
-        *page_number += 1;
-        Some(*page_number)
-    } else {
-        None
-    };
-
     match media_kind {
         MediaKind::Photo(photo) => {
             let max_size = photo
@@ -137,11 +133,10 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &max_size.file,
-                &app_state.config.media_directory,
                 photo.caption.as_deref(),
                 "jpg",
-                page_number,
-                media_group_id.as_ref(),
+                app_state,
+                media_group_id,
             )
             .await
             .context("Failed download photo")?;
@@ -150,14 +145,13 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &video.video.file,
-                &app_state.config.media_directory,
                 video
                     .caption
                     .as_deref()
                     .or(video.video.file_name.as_deref()),
                 "mp4",
-                page_number,
-                media_group_id.as_ref(),
+                app_state,
+                media_group_id,
             )
             .await
             .context("Failed download video")?;
@@ -166,14 +160,13 @@ async fn handle_media_message(
             download_and_save_file(
                 bot,
                 &audio.audio.file,
-                &app_state.config.media_directory,
                 audio
                     .caption
                     .as_deref()
                     .or(audio.audio.file_name.as_deref()),
                 "mp3",
-                page_number,
-                media_group_id.as_ref(),
+                app_state,
+                media_group_id,
             )
             .await
             .context("Failed download audio")?;
@@ -186,16 +179,30 @@ async fn handle_media_message(
 async fn download_and_save_file(
     bot: Arc<Bot>,
     file_meta: &FileMeta,
-    media_directory: &str,
     file_name: Option<&str>,
     ext: &str,
-    page_number: Option<u32>,
-    media_group_id: Option<&String>,
+    app_state: Arc<AppState>,
+    media_group_id: Option<String>,
 ) -> Result<()> {
+    let media_group = if let Some(media_group_id) = &media_group_id {
+        let mut map = app_state.media_group_page_numbers.lock().unwrap();
+        let page_number = map.entry(media_group_id.clone()).or_insert(MediaGroupData {
+            page_number: 0,
+            title: file_name
+                .map(Path::new)
+                .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
+                .unwrap_or(media_group_id)
+                .to_owned(),
+        });
+        page_number.page_number += 1;
+        Some(page_number.clone())
+    } else {
+        None
+    };
+
     let file = bot.get_file(file_meta.id.clone()).send().await?;
-    let (filename, extension) =
-        get_filename_and_extension(file_meta, file_name, ext, page_number, media_group_id);
-    let mut file_path = PathBuf::from(media_directory);
+    let (filename, extension) = get_filename_and_extension(file_meta, file_name, ext, media_group);
+    let mut file_path = PathBuf::from(app_state.config.media_directory.clone());
     file_path.push(format!("{}.{}", filename, extension));
 
     tokio::fs::create_dir_all(&file_path.parent().expect("Parent missing"))
@@ -221,25 +228,29 @@ fn get_filename_and_extension(
     file_meta: &FileMeta,
     file_name: Option<&str>,
     default_ext: &str,
-    page_number: Option<u32>,
-    media_group_id: Option<&String>,
+    media_group_data: Option<MediaGroupData>,
 ) -> (String, String) {
-    let stem = file_name
-        .map(Path::new)
-        .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
-        .or_else(|| media_group_id.map(|x| x.as_str()))
-        .unwrap_or("");
-
     let ext = file_name
         .map(Path::new)
         .and_then(|p| p.extension().and_then(|e| e.to_str()))
         .unwrap_or(default_ext);
 
-    let title_prefix = if page_number.is_some() { "title:" } else { "" };
-    let page_part = page_number.map_or_else(String::new, |num| format!("{{page:{}}}", num));
+    let prefix = if let Some(ref x) = media_group_data {
+        format!("title:[{}]", x.title)
+    } else {
+        let stem = file_name
+            .unwrap_or("")
+            .to_owned();
+        format!("[{stem}]")
+    };
+    let page_part =
+        media_group_data.map_or_else(String::new, |data| format!("{{page:{}}}", data.page_number));
 
     let unique_id = &file_meta.unique_id;
-    let filename = format!("{title_prefix}[{stem}]_{unique_id}{page_part}");
+    let filename = format!("{prefix}_{unique_id}{page_part}");
+
+    // remove forward slashes
+    let filename = filename.replace("/", "\\");
 
     (filename, ext.to_owned())
 }
