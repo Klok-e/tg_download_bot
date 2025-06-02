@@ -6,13 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-teloxide = { version = "0.12.2", features = ["macros"] }
+teloxide = { version = "0.15.0", features = ["macros"] }
 tokio = { version = "1.21.0", features = ["rt-multi-thread", "macros", "sync"] }
 anyhow = "1.0.64"
 toml = "0.8.2"
-config = "0.13.3"
+config = "0.15.11"
 serde = { version = "1.0.144", features = ["derive"] }
 log = "0.4.17"
-secrecy = { version = "0.8.0", features = ["serde"] }
-env_logger = "0.10.0"
-reqwest = "0.11.14"
+secrecy = { version = "0.10.3", features = ["serde"] }
+env_logger = "0.11.8"
+reqwest = "0.12.19"
