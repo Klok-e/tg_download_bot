@@ -14,7 +14,7 @@ use serde::Deserialize;
 use teloxide::{
     net::Download,
     prelude::*,
-    types::{FileMeta, MediaKind, MessageCommon, MessageKind},
+    types::{FileMeta, MediaGroupId, MediaKind, MessageCommon, MessageKind},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -39,7 +39,7 @@ struct AppConfig {
 
 struct AppState {
     config: AppConfig,
-    media_group_page_numbers: Mutex<std::collections::HashMap<String, MediaGroupData>>,
+    media_group_page_numbers: Mutex<std::collections::HashMap<MediaGroupId, MediaGroupData>>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +95,7 @@ async fn run_bot(app_config: AppConfig) {
     Dispatcher::builder(tg.clone(), handler)
         .dependencies(dptree::deps![app_state, tg.clone()])
         .default_handler(|upd| async move {
-            warn!("unhandled update: {:?}", upd);
+            warn!("unhandled update: {upd:?}");
         })
         .error_handler(LoggingErrorHandler::with_custom_text(
             "an error has occurred in the dispatcher",
@@ -182,7 +182,7 @@ async fn download_and_save_file(
     file_name: Option<&str>,
     ext: &str,
     app_state: Arc<AppState>,
-    media_group_id: Option<String>,
+    media_group_id: Option<MediaGroupId>,
 ) -> Result<()> {
     let media_group = if let Some(media_group_id) = &media_group_id {
         let mut map = app_state.media_group_page_numbers.lock().unwrap();
@@ -191,7 +191,7 @@ async fn download_and_save_file(
             title: file_name
                 .map(Path::new)
                 .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
-                .unwrap_or(media_group_id)
+                .unwrap_or(&format!("{media_group_id}"))
                 .to_owned(),
         });
         page_number.page_number += 1;
@@ -203,7 +203,7 @@ async fn download_and_save_file(
     let file = bot.get_file(file_meta.id.clone()).send().await?;
     let (filename, extension) = get_filename_and_extension(file_meta, file_name, ext, media_group);
     let mut file_path = PathBuf::from(app_state.config.media_directory.clone());
-    file_path.push(format!("{}.{}", filename, extension));
+    file_path.push(format!("{filename}.{extension}"));
 
     tokio::fs::create_dir_all(&file_path.parent().expect("Parent missing"))
         .await
@@ -217,7 +217,7 @@ async fn download_and_save_file(
         absolute_file.read_to_end(&mut buf).await?;
         dst.write_all(&buf).await?;
     } else if let Err(e) = bot.download_file(&file.path, &mut dst).await {
-        log::error!("Failed to download file: {}", e);
+        log::error!("Failed to download file: {e}");
     } else {
         log::info!("Downloaded and saved file: {}", file_path.display());
     }
@@ -238,9 +238,7 @@ fn get_filename_and_extension(
     let prefix = if let Some(ref x) = media_group_data {
         format!("title:[{}]", x.title)
     } else {
-        let stem = file_name
-            .unwrap_or("")
-            .to_owned();
+        let stem = file_name.unwrap_or("").to_owned();
         format!("[{stem}]")
     };
     let page_part =
